@@ -174,7 +174,8 @@ def create_page(schema, parsed, filepath, code, lang):
         "properties": properties,
         "children": children,
     }
-    notion_request("/pages", "POST", body)
+    result = notion_request("/pages", "POST", body)
+    return result.get("url", "(URL 없음)")
 
 
 def main():
@@ -183,6 +184,7 @@ def main():
         return
 
     schema = get_database_schema()
+    print(f"대상 데이터베이스 ID: {DATABASE_ID}")
 
     for filepath in CHANGED_FILES:
         ext = filepath.rsplit(".", 1)[-1].lower() if "." in filepath else ""
@@ -203,7 +205,8 @@ def main():
 
         lang = EXT_LANG[ext]
         print(f"Notion 페이지 생성 중: {filepath}  (문제번호={parsed['num']}, 이름={parsed['name']}, 종류={parsed['algo']}, 출처={parsed['source']})")
-        create_page(schema, parsed, filepath, code, lang)
+        page_url = create_page(schema, parsed, filepath, code, lang)
+        print(f"  -> 생성 완료: {page_url}")
 
     print("완료")
 
