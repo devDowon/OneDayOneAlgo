@@ -16,6 +16,7 @@ permissions:
 jobs:
   register-to-notion:
     runs-on: ubuntu-latest
+    environment: Notion
     steps:
       - name: 레포 체크아웃 (변경 비교를 위해 전체 히스토리 필요)
         uses: actions/checkout@v4
