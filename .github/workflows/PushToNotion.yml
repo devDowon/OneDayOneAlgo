@@ -54,4 +54,4 @@ jobs:
           COMMIT_DATE: ${{ github.event.head_commit.timestamp }}
           REPO_URL: https://github.com/${{ github.repository }}/blob/main
           CHANGED_FILES: ${{ steps.diff.outputs.files }}
-        run: python github_to_notion.py
+        run: python scripts/github_to_notion.py
