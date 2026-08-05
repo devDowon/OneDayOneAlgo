@@ -2,23 +2,23 @@
 GitHub push -> Notion 데이터베이스에 코드 페이지 자동 등록 스크립트
 
 전제로 하는 레포 경로 규칙:
-    {출처}/{알고리즘종류}/{문제번호}-{문제이름}/{코드파일}
-    예: 프로그래머스/그리디/12938-이중우선순위큐/solution.py
+    {플랫폼}/{난이도}/{문제번호}. {문제이름}/{코드파일}
+    예: 프로그래머스/Lv3/12938. 이중우선순위큐/solution.py
+    예: 백준/Gold3/1717. 집합의표현/sol.py
 
 동작 방식:
 1. 이번 push로 추가/수정된 파일 목록을 받음 (workflow에서 git diff로 계산)
 2. 지정된 확장자(코드 파일)만 필터링, 위 경로 규칙에 맞지 않으면 건너뜀
-3. 경로에서 문제번호/문제이름/알고리즘종류/출처를 파싱
+3. 경로에서 문제번호/문제이름/난이도/플랫폼을 파싱
 4. Notion 데이터베이스에 새 페이지 생성:
    - title 속성(예: "code") = 문제 이름
-   - "문제 번호" 류 속성 = 파싱한 번호
-   - "작성자" 류 속성 = 커밋 작성자 이름
+   - "문제 번호" 류 속성 = 파싱한 번호 (단, 프로그래머스는 항상 "P" 고정)
+   - "작성자" 류 속성 = GitHub 계정→실명 매핑(AUTHOR_MAP) 우선, 없으면 커밋 작성자 이름
    - "날짜" 류 속성(date 타입) = 커밋 일시
-   - "알고리즘/종류/카테고리" 류 속성 = 파싱한 알고리즘 종류 (있는 경우에만)
-   - "출처/source/플랫폼" 류 속성 = 파싱한 출처 (있는 경우에만)
+   - "난이도" 류 속성 = 파싱한 난이도 (경로의 두 번째 폴더명 그대로)
+   - "출처/source/플랫폼" 류 속성 = 파싱한 플랫폼 (있는 경우에만)
    - "링크/url" 류 속성 = GitHub 파일 링크 (있는 경우에만)
    - 본문에 code 블록으로 파일 내용 삽입
-   - "난이도"는 레포에 정보가 없어 자동으로 채우지 않음 (수동 입력)
 
 필요한 환경변수:
 - NOTION_TOKEN, DATABASE_ID
@@ -57,8 +57,10 @@ EXT_LANG = {
 # so long files are split into multiple segments automatically.
 MAX_SEGMENT = 1900
 
-# 경로 규칙: 출처/알고리즘종류/문제번호-문제이름/파일명
-PATH_RE = re.compile(r"^(?P<source>[^/]+)/(?P<algo>[^/]+)/(?P<probdir>[^/]+)/(?P<filename>[^/]+)$")
+# 경로 규칙: 플랫폼/난이도/문제번호. 문제이름/파일명
+PATH_RE = re.compile(r"^(?P<platform>[^/]+)/(?P<level>[^/]+)/(?P<probdir>[^/]+)/(?P<filename>[^/]+)$")
+# 문제 폴더명: "12938. 이중우선순위큐" 형태 (마침표+공백 구분). 없으면 하이픈도 대체로 허용.
+PROBDIR_RE = re.compile(r"^(?P<id>\S+)\.\s*(?P<title>.+)$")
 
 
 def notion_request(path, method="GET", body=None):
@@ -126,19 +128,23 @@ def parse_path(filepath):
     m = PATH_RE.match(filepath)
     if not m:
         return None
-    source, algo, probdir, filename = m.group("source", "algo", "probdir", "filename")
-    if "-" in probdir:
+    platform, level, probdir, filename = m.group("platform", "level", "probdir", "filename")
+
+    m2 = PROBDIR_RE.match(probdir)
+    if m2:
+        num, name = m2.group("id"), m2.group("title")
+    elif "-" in probdir:  # 구버전 "번호-이름" 형식도 대체 지원
         num, name = probdir.split("-", 1)
     else:
         num, name = probdir, probdir
 
     # 프로그래머스 문제는 문제 번호를 실제 번호 대신 'P'로 고정
-    if source.strip() == "프로그래머스":
+    if platform.strip() == "프로그래머스":
         num = "P"
 
     return {
-        "source": source,
-        "algo": algo,
+        "platform": platform,
+        "level": level,
         "num": num.strip(),
         "name": name.strip(),
         "filename": filename,
@@ -184,8 +190,8 @@ def build_properties(schema, parsed):
     set_prop(properties, schema, {"문제 번호", "문제번호", "번호", "no", "number"}, parsed["num"])
     set_prop(properties, schema, {"작성자", "이름", "author", "name", "person"}, resolve_author_name())
     set_prop(properties, schema, {"날짜", "date"}, COMMIT_DATE)
-    set_prop(properties, schema, {"알고리즘", "종류", "카테고리", "algorithm", "type", "category"}, parsed["algo"])
-    set_prop(properties, schema, {"출처", "source", "플랫폼", "platform"}, parsed["source"])
+    set_prop(properties, schema, {"난이도", "level", "lv", "difficulty"}, parsed["level"])
+    set_prop(properties, schema, {"출처", "source", "플랫폼", "platform"}, parsed["platform"])
 
     return properties
 
@@ -237,7 +243,7 @@ def main():
 
         parsed = parse_path(filepath)
         if parsed is None:
-            print(f"  - 건너뜀 (경로 규칙 불일치, 'source/algo/번호-이름/파일' 형태여야 함): {filepath}")
+            print(f"  - 건너뜀 (경로 규칙 불일치, '플랫폼/난이도/번호. 이름/파일' 형태여야 함): {filepath}")
             continue
 
         with open(filepath, "r", encoding="utf-8", errors="replace") as f:
@@ -247,7 +253,7 @@ def main():
             continue
 
         lang = EXT_LANG[ext]
-        print(f"Notion 페이지 생성 중: {filepath}  (문제번호={parsed['num']}, 이름={parsed['name']}, 종류={parsed['algo']}, 출처={parsed['source']})")
+        print(f"Notion 페이지 생성 중: {filepath}  (문제번호={parsed['num']}, 이름={parsed['name']}, 난이도={parsed['level']}, 플랫폼={parsed['platform']})")
         page_url = create_page(schema, parsed, filepath, code, lang)
         print(f"  -> 생성 완료: {page_url}")
 
