@@ -22,7 +22,9 @@ GitHub push -> Notion 데이터베이스에 코드 페이지 자동 등록 스�
 
 필요한 환경변수:
 - NOTION_TOKEN, DATABASE_ID
-- COMMIT_AUTHOR   : 커밋 작성자 이름
+- COMMIT_AUTHOR   : 커밋 작성자 이름 (매핑에 없을 때 사용할 대체값)
+- GITHUB_ACTOR    : push를 실행한 GitHub 로그인 계정 (매핑의 기준 키)
+- AUTHOR_MAP      : '{"github계정": "실제이름"}' 형태의 JSON 문자열 (선택)
 - COMMIT_DATE     : 커밋 일시 (ISO 8601)
 - REPO_URL        : GitHub 파일 링크 생성용 (예: https://github.com/org/repo/blob/main)
 - CHANGED_FILES   : 개행으로 구분된 변경 파일 목록
@@ -31,12 +33,15 @@ GitHub push -> Notion 데이터베이스에 코드 페이지 자동 등록 스�
 import os
 import re
 import json
+import unicodedata
 import urllib.request
 import urllib.error
 
 NOTION_TOKEN = os.environ["NOTION_TOKEN"]
 DATABASE_ID = os.environ["DATABASE_ID"]
 COMMIT_AUTHOR = os.environ.get("COMMIT_AUTHOR", "")
+GITHUB_ACTOR = os.environ.get("GITHUB_ACTOR", "")
+AUTHOR_MAP = json.loads(os.environ.get("AUTHOR_MAP", "{}") or "{}")
 COMMIT_DATE = os.environ.get("COMMIT_DATE", "")
 REPO_BLOB_URL = os.environ.get("REPO_URL", "")
 CHANGED_FILES = [f for f in os.environ.get("CHANGED_FILES", "").splitlines() if f.strip()]
@@ -86,6 +91,31 @@ def find_title_property(schema):
         if prop["type"] == "title":
             return name
     raise RuntimeError("데이터베이스에 title 속성을 찾을 수 없습니다.")
+
+
+def resolve_existing_path(filepath):
+    """한글 등 유니코드 파일명의 NFC/NFD 정규화 불일치를 흡수해서
+    실제 존재하는 경로를 찾아 반환. 못 찾으면 None."""
+    candidates = [filepath, unicodedata.normalize("NFC", filepath), unicodedata.normalize("NFD", filepath)]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+
+    # 그래도 못 찾으면 디렉토리를 순회하며 정규화 후 비교 (최후 수단)
+    target_nfc = unicodedata.normalize("NFC", filepath)
+    parts = filepath.split("/")
+    cur = "."
+    for part in parts:
+        part_nfc = unicodedata.normalize("NFC", part)
+        try:
+            entries = os.listdir(cur)
+        except FileNotFoundError:
+            return None
+        match = next((e for e in entries if unicodedata.normalize("NFC", e) == part_nfc), None)
+        if match is None:
+            return None
+        cur = os.path.join(cur, match)
+    return cur if os.path.exists(cur) else None
 
 
 def chunk_text(text, size=MAX_SEGMENT):
@@ -138,6 +168,13 @@ def set_prop(properties, schema, candidates, value):
         properties[name] = {"url": str(value)}
 
 
+def resolve_author_name():
+    """GitHub 계정(github.actor) 기준으로 실제 이름을 매핑. 매핑에 없으면 커밋 작성자 이름으로 대체."""
+    if GITHUB_ACTOR and GITHUB_ACTOR in AUTHOR_MAP:
+        return AUTHOR_MAP[GITHUB_ACTOR]
+    return COMMIT_AUTHOR
+
+
 def build_properties(schema, parsed):
     title_name = find_title_property(schema)
     properties = {
@@ -145,7 +182,7 @@ def build_properties(schema, parsed):
     }
 
     set_prop(properties, schema, {"문제 번호", "문제번호", "번호", "no", "number"}, parsed["num"])
-    set_prop(properties, schema, {"작성자", "이름", "author", "name", "person"}, COMMIT_AUTHOR)
+    set_prop(properties, schema, {"작성자", "이름", "author", "name", "person"}, resolve_author_name())
     set_prop(properties, schema, {"날짜", "date"}, COMMIT_DATE)
     set_prop(properties, schema, {"알고리즘", "종류", "카테고리", "algorithm", "type", "category"}, parsed["algo"])
     set_prop(properties, schema, {"출처", "source", "플랫폼", "platform"}, parsed["source"])
@@ -189,18 +226,24 @@ def main():
     for filepath in CHANGED_FILES:
         ext = filepath.rsplit(".", 1)[-1].lower() if "." in filepath else ""
         if ext not in EXT_LANG:
+            print(f"  - 건너뜀 (지원하지 않는 확장자): {filepath}")
             continue
         if not os.path.exists(filepath):
-            continue  # 삭제된 파일은 건너뜀
+            resolved = resolve_existing_path(filepath)
+            if resolved is None:
+                print(f"  - 건너뜀 (파일이 존재하지 않음, cwd={os.getcwd()}): {filepath}")
+                continue
+            filepath = resolved
 
         parsed = parse_path(filepath)
         if parsed is None:
-            print(f"  - 건너뜀 (경로 규칙 불일치): {filepath}")
+            print(f"  - 건너뜀 (경로 규칙 불일치, 'source/algo/번호-이름/파일' 형태여야 함): {filepath}")
             continue
 
         with open(filepath, "r", encoding="utf-8", errors="replace") as f:
             code = f.read()
         if not code.strip():
+            print(f"  - 건너뜀 (빈 파일): {filepath}")
             continue
 
         lang = EXT_LANG[ext]
