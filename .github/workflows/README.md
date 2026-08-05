@@ -1,6 +1,6 @@
-# Notion → GitHub 코드 동기화
+# GitHub → Notion 코드 자동 등록
 
-Notion 데이터베이스(문제 풀이 아카이브)에 올라온 코드를 매일 자동으로 GitHub 레포에 커밋합니다.
+main 브랜치에 push할 때마다, 이번 push로 추가/수정된 코드 파일들을 파싱해서 Notion 데이터베이스에 새 페이지로 자동 등록합니다.
 
 ## 설정 순서
 
@@ -20,39 +20,17 @@ Notion 데이터베이스(문제 풀이 아카이브)에 올라온 코드를 매
 ### 3. 파일 배치
 이 폴더 구조를 레포 루트에 그대로 복사하세요:
 ```
-.github/workflows/notion-sync.yml
-notion_sync.py
-```
-
-### 4. 실행 확인
-- Actions 탭 → "Notion Sync" → "Run workflow" 버튼으로 수동 실행해서 먼저 테스트
-- 정상 동작하면 매일 자동으로 실행됨 (cron 스케줄은 yml 파일에서 조정 가능)
-
-## 동작 방식
-- 데이터베이스의 모든 항목(페이지)을 조회
-- 각 페이지 안의 **code 블록**을 찾아서 파일로 저장 (일반 텍스트/표는 무시됨)
-- 파일명은 페이지 제목(title 속성) 기준
-- "작성자/이름/Author/Person" 등의 속성이 있으면 `problems/작성자이름/문제명.py` 형태로 폴더 정리
-- 파일 상단에 원본 Notion 속성들이 주석으로 자동 기록됨
-
----
-
-## (추가) GitHub → Notion: main 브랜치 push 시 자동 등록
-
-main에 push할 때마다, 이번 push로 추가/수정된 코드 파일들을 각각 Notion 데이터베이스에 새 페이지로 등록합니다.
-
-### 배치할 파일
-```
 .github/workflows/push-to-notion.yml
 github_to_notion.py
 ```
-(Secrets는 위 pull 방향과 동일한 `NOTION_TOKEN`, `NOTION_DATABASE_ID`를 그대로 씁니다.)
 
-### 동작 방식
+## 동작 방식
+
 - **전제하는 레포 경로 규칙**: `출처/알고리즘종류/문제번호-문제이름/코드파일`
   예: `프로그래머스/그리디/12938-이중우선순위큐/solution.py`
   이 규칙에 안 맞는 경로(깊이가 다르거나 `-` 구분자가 없는 등)는 자동으로 건너뜁니다.
 - 코드 파일 확장자(`.py .js .ts .java .c .cpp .cs .go .rs .kt .swift .rb .php .sql`)만 대상
+- **프로그래머스** 문제는 문제 번호를 실제 번호 대신 `P`로 고정, **그 외(SWEA 등)**는 폴더명의 번호를 그대로 사용
 - 필드 매핑 (데이터베이스에 해당 이름의 속성이 있을 때만 자동으로 채워짐, 없으면 조용히 무시):
 
   | 경로/커밋 정보 | Notion 속성 이름 예시 | 타입 |
@@ -68,14 +46,38 @@ github_to_notion.py
 - **`난이도`는 레포 경로/파일에 정보가 없어 자동으로 채우지 않습니다.** 수동으로 입력하거나, 코드 파일 첫 줄에 난이도를 적는 규칙을 만들면 파싱 로직을 추가해드릴 수 있어요.
 - 파일 내용은 code 블록으로 본문에 삽입 (2000자 단위로 자동 분할)
 
-### ⚠️ 양방향 사용 시 주의
-pull 스크립트(`notion_sync.py`)와 이 push 스크립트를 동시에 쓰면 **무한 동기화 루프**가 생길 수 있습니다.
-- pull → GitHub에 코드 생성 → 그게 다시 push → Notion에 중복 페이지 생성 → 다시 pull...
-- 당장은 두 워크플로우를 같은 레포/같은 폴더에 동시 적용하지 말고, 필요에 따라 하나만 골라 쓰는 걸 권장합니다.
-- 둘 다 꼭 써야 한다면, pull 스크립트가 이 push-스크립트로 생성된 페이지를 건너뛰도록 Notion 쪽에 "source: github" 같은 태그/속성을 추가하고 필터링하는 로직이 필요합니다. 원하시면 이 부분도 만들어드릴게요.
+## 🧪 테스트 방법
+
+**0단계 — 토큰/DB 연결 확인 (터미널에서)**
+실제 push 전에 토큰과 DB 접근이 되는지부터 확인하세요.
+```bash
+curl -s -X GET "https://api.notion.com/v1/databases/{DATABASE_ID}" \
+  -H "Authorization: Bearer {NOTION_TOKEN}" \
+  -H "Notion-Version: 2022-06-28"
+```
+- 정상이면 데이터베이스 속성(properties) JSON이 출력됩니다.
+- `401`이면 토큰이 틀림, `404`면 Integration이 이 데이터베이스에 연결(Connect)되어 있지 않은 것입니다.
+
+**1단계 — GitHub Actions 수동 테스트 (실제 push 없이)**
+1. 레포에 파일들을 배치하고 Secrets를 등록한 뒤, main에 한 번 push해서 워크플로우 파일 자체를 반영하세요. (이 최초 1회는 실제 push가 필요합니다.)
+2. GitHub 레포 → **Actions** 탭 → **Push to Notion** 워크플로우 선택 → **Run workflow** 버튼 클릭
+3. `test_file` 입력창에 실제 존재하는 파일 경로를 하나 입력 (예: `SWEA/DP/4008-특이한사칙연산/sol.py`)
+4. 실행 후 로그에서 `Notion 페이지 생성 중: ...` 메시지와 `완료`가 뜨는지 확인
+5. Notion 데이터베이스에 새 페이지가 실제로 생성됐는지 확인 (제목/문제번호/작성자/날짜가 의도대로 채워졌는지)
+
+**2단계 — 실제 push로 end-to-end 테스트**
+```bash
+mkdir -p "SWEA/DP/9999-테스트문제"
+echo "print('hello')" > "SWEA/DP/9999-테스트문제/sol.py"
+git add . && git commit -m "test: notion sync 테스트" && git push origin main
+```
+Actions 탭에서 로그 확인 후, Notion에서 생성된 걸 확인하고 테스트용 파일/페이지는 삭제하세요.
+
+**실패 시 체크리스트**
+- Actions 로그에 `403`/`404` → Integration이 DB에 연결 안 됨 (소유자에게 연결 요청)
+- `건너뜀 (경로 규칙 불일치)` 로그 → 파일 경로가 `출처/알고리즘종류/번호-이름/파일` 4단계 구조가 아님
+- select 속성인데 값이 안 들어감 → Notion select 속성은 존재하지 않는 옵션 값을 API로 못 넣는 경우가 있어 데이터베이스에 해당 옵션을 미리 만들어둬야 할 수 있음 (예: 작성자 select에 새 이름 추가)
 
 ## 주의사항
-- **Notion 쪽에서 Integration이 해당 데이터베이스에 연결(Connect)되어 있어야** API로 읽을 수 있습니다.
-  데이터베이스 페이지 우측 상단 `...` 메뉴 → `연결 추가(Add connections)` 에서 확인 가능 (소유자만 가능한 경우가 많음).
-- 코드 블록이 없는 페이지는 자동으로 건너뜁니다.
-- 언어(language) 인식은 Notion code 블록에 지정된 언어를 기준으로 확장자를 결정합니다. 목록에 없는 언어는 `.txt`로 저장되니, 필요하면 `notion_sync.py`의 `LANG_EXT` 딕셔너리에 추가하세요.
+- **Notion 쪽에서 Integration이 해당 데이터베이스에 연결(Connect)되어 있어야** API로 페이지를 생성할 수 있습니다. 읽기뿐 아니라 **쓰기(편집) 권한**까지 필요합니다.
+  데이터베이스 페이지 우측 상단 `...` 메뉴 → `연결 추가(Add connections)`에서 확인 가능 (소유자만 가능한 경우가 많음).
