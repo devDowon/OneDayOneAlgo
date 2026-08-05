@@ -3,6 +3,12 @@ name: Push to Notion
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      test_file:
+        description: "테스트용 파일 경로 1개 (예: SWEA/DP/4008-특이한사칙연산/sol.py). 비우면 아무 동작 안 함."
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -24,13 +30,17 @@ jobs:
       - name: 변경된 파일 목록 계산
         id: diff
         run: |
-          BEFORE="${{ github.event.before }}"
-          AFTER="${{ github.event.after }}"
-          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            # 첫 push인 경우 빈 트리와 비교
-            FILES=$(git diff --name-only --diff-filter=ACM $(git hash-object -t tree /dev/null) "$AFTER")
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            FILES="${{ github.event.inputs.test_file }}"
           else
-            FILES=$(git diff --name-only --diff-filter=ACM "$BEFORE" "$AFTER")
+            BEFORE="${{ github.event.before }}"
+            AFTER="${{ github.event.after }}"
+            if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+              # 첫 push인 경우 빈 트리와 비교
+              FILES=$(git diff --name-only --diff-filter=ACM $(git hash-object -t tree /dev/null) "$AFTER")
+            else
+              FILES=$(git diff --name-only --diff-filter=ACM "$BEFORE" "$AFTER")
+            fi
           fi
           echo "files<<EOF" >> "$GITHUB_OUTPUT"
           echo "$FILES" >> "$GITHUB_OUTPUT"
@@ -40,7 +50,7 @@ jobs:
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
-          COMMIT_AUTHOR: ${{ github.event.head_commit.author.name }}
+          COMMIT_AUTHOR: ${{ github.event.head_commit.author.name || github.actor }}
           COMMIT_DATE: ${{ github.event.head_commit.timestamp }}
           REPO_URL: https://github.com/${{ github.repository }}/blob/main
           CHANGED_FILES: ${{ steps.diff.outputs.files }}
