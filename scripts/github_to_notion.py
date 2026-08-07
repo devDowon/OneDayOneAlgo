@@ -138,10 +138,6 @@ def parse_path(filepath):
     else:
         num, name = probdir, probdir
 
-    # 프로그래머스 문제는 문제 번호를 실제 번호 대신 'P'로 고정
-    if platform.strip() == "프로그래머스":
-        num = "P"
-
     return {
         "platform": platform,
         "level": level,
