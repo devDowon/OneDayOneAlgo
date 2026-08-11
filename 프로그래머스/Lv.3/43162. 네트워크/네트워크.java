@@ -1,27 +1,39 @@
-import java.util.ArrayList;
-import java.util.List;
-
 class Solution {
-	int[] nodesGroup;
-	
-	public void dfs(int idx, int groupNum, int[][] computers) {
-		for(int i = 0; i < computers[idx].length; i++) {
-			if(i == idx) continue;
-			if(computers[idx][i] == 0) continue;
-			if(nodesGroup[i] != 0) continue;
-			
-			nodesGroup[i] = groupNum;
-			dfs(i, groupNum, computers);
-		}
-	}
-	
+    int[] parent;
+    
+    // Find: 경로 압축 적용
+    public int find(int x) {
+        if (parent[x] == x) return x;
+        return parent[x] = find(parent[x]); // 경로 압축
+    }
+    
+    // Union
+    public void union(int x, int y) {
+        int rootX = find(x);
+        int rootY = find(y);
+        if (rootX != rootY) {
+            parent[rootX] = rootY;
+        }
+    }
+    
     public int solution(int n, int[][] computers) {
+        parent = new int[n];
+        for (int i = 0; i < n; i++) {
+            parent[i] = i; // 초기엔 자기 자신이 루트
+        }
+        
+        for (int i = 0; i < n; i++) {
+            for (int j = i + 1; j < n; j++) { // i==j는 스킵, 대칭이라 j=i+1부터
+                if (computers[i][j] == 1) {
+                    union(i, j);
+                }
+            }
+        }
+        
+        // 서로 다른 루트의 개수 = 네트워크 개수
         int answer = 0;
-        nodesGroup = new int[n];
-        for(int i = 0; i < nodesGroup.length; i++) {
-        	if(nodesGroup[i] != 0) continue;
-        	
-        	dfs(i, ++answer, computers);
+        for (int i = 0; i < n; i++) {
+            if (find(i) == i) answer++;
         }
         return answer;
     }
