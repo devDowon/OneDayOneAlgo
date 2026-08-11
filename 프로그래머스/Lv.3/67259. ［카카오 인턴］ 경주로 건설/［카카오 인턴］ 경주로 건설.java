@@ -62,7 +62,7 @@ class Solution {
 					continue;
 
 				int weight = (dir == p.d) ? 100 : 500 + 100;
-				if (minWeight[nx][ny][dir.ordinal()] >= p.w + weight) {
+				if (minWeight[nx][ny][dir.ordinal()] > p.w + weight) {
 					minWeight[nx][ny][dir.ordinal()] = p.w + weight;
 					q.offer(new Pos(nx, ny, dir, p.w + weight));
 				}
